@@ -1,13 +1,13 @@
-package com.florez.fraud_detection;
+package com.florez.backend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class FraudDetectionApplication {
+public class BackendApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(FraudDetectionApplication.class, args);
+		SpringApplication.run(BackendApplication.class, args);
 	}
 
 }

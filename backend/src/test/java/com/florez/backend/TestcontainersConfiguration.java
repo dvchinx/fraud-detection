@@ -1,4 +1,4 @@
-package com.florez.fraud_detection;
+package com.florez.backend;
 
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;

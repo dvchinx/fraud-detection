@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16
-    container_name: fraud-detection-postgres
+    container_name: backend-postgres
     environment:
       POSTGRES_DB: ${DB_NAME:-fraud_detection}
       POSTGRES_USER: ${DB_USERNAME:-fraud_detection}
@@ -18,7 +18,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: fraud-detection-redis
+    container_name: backend-redis
     ports:
       - "6379:6379"
     healthcheck:
@@ -29,7 +29,7 @@ services:
 
   kafka:
     image: apache/kafka:latest
-    container_name: fraud-detection-kafka
+    container_name: backend-kafka
     ports:
       - "9092:9092"
     environment:
