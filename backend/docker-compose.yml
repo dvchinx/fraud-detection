@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${DB_USERNAME:-fraud_detection}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-fraud_detection}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
