@@ -12,6 +12,7 @@ public record TransactionResponse(
         String merchant,
         String country,
         TransactionStatus status,
+        String reason,
         Instant createdAt
 ) {
 
@@ -24,6 +25,7 @@ public record TransactionResponse(
                 transaction.getMerchant(),
                 transaction.getCountry(),
                 transaction.getStatus(),
+                transaction.getReason(),
                 transaction.getCreatedAt()
         );
     }

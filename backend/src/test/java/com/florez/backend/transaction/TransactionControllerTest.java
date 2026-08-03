@@ -60,6 +60,18 @@ class TransactionControllerTest {
         token = jwtService.generateToken(user);
     }
 
+    private TransactionResponse createTransaction(BigDecimal amount, String country) throws Exception {
+        TransactionRequest request = new TransactionRequest(userId, amount, "USD", "Amazon", country);
+
+        String responseBody = mockMvc.perform(post("/transactions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andReturn().getResponse().getContentAsString();
+
+        return objectMapper.readValue(responseBody, TransactionResponse.class);
+    }
+
     @Test
     void createAndGetTransaction() throws Exception {
         TransactionRequest request = new TransactionRequest(userId, new BigDecimal("100.50"), "USD", "Amazon", "US");
@@ -69,7 +81,8 @@ class TransactionControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("PENDING"))
+                .andExpect(jsonPath("$.status").value("APPROVED"))
+                .andExpect(jsonPath("$.reason").value("Ninguna regla activada"))
                 .andReturn().getResponse().getContentAsString();
 
         TransactionResponse created = objectMapper.readValue(responseBody, TransactionResponse.class);
@@ -91,5 +104,39 @@ class TransactionControllerTest {
         mockMvc.perform(get("/transactions/" + UUID.randomUUID())
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void highAmountTransaction_isBlocked() throws Exception {
+        TransactionRequest request = new TransactionRequest(userId, new BigDecimal("15000"), "USD", "Amazon", "US");
+
+        mockMvc.perform(post("/transactions")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("BLOCKED"))
+                .andExpect(jsonPath("$.reason").value(org.hamcrest.Matchers.containsString("bloqueo")));
+    }
+
+    @Test
+    void rapidTransactions_triggerVelocityReview() throws Exception {
+        for (int i = 0; i < 5; i++) {
+            createTransaction(new BigDecimal("10.00"), "US");
+        }
+
+        TransactionResponse sixth = createTransaction(new BigDecimal("10.00"), "US");
+
+        org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.REVIEW, sixth.status());
+        org.junit.jupiter.api.Assertions.assertTrue(sixth.reason().contains("transacciones"));
+    }
+
+    @Test
+    void countryChange_triggersGeoReview() throws Exception {
+        createTransaction(new BigDecimal("10.00"), "US");
+        TransactionResponse second = createTransaction(new BigDecimal("10.00"), "CA");
+
+        org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.REVIEW, second.status());
+        org.junit.jupiter.api.Assertions.assertTrue(second.reason().contains("País"));
     }
 }

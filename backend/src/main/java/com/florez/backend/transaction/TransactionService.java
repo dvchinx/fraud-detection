@@ -1,6 +1,7 @@
 package com.florez.backend.transaction;
 
 import com.florez.backend.common.exception.ResourceNotFoundException;
+import com.florez.backend.fraud.FraudEvaluationService;
 import com.florez.backend.user.User;
 import com.florez.backend.user.UserRepository;
 import org.springframework.stereotype.Service;
@@ -15,10 +16,16 @@ public class TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
+    private final FraudEvaluationService fraudEvaluationService;
 
-    public TransactionService(TransactionRepository transactionRepository, UserRepository userRepository) {
+    public TransactionService(
+            TransactionRepository transactionRepository,
+            UserRepository userRepository,
+            FraudEvaluationService fraudEvaluationService
+    ) {
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
+        this.fraudEvaluationService = fraudEvaluationService;
     }
 
     @Transactional
@@ -32,6 +39,10 @@ public class TransactionService {
         transaction.setCurrency(request.currency());
         transaction.setMerchant(request.merchant());
         transaction.setCountry(request.country());
+
+        FraudEvaluationService.EvaluationResult evaluation = fraudEvaluationService.evaluate(transaction);
+        transaction.setStatus(evaluation.status());
+        transaction.setReason(evaluation.reason());
 
         return TransactionResponse.from(transactionRepository.save(transaction));
     }

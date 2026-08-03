@@ -53,6 +53,9 @@ public class Transaction {
     @Column(nullable = false)
     private TransactionStatus status;
 
+    @Column(columnDefinition = "TEXT")
+    private String reason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
