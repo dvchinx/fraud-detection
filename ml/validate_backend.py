@@ -98,7 +98,7 @@ def main():
         )
 
         transaction_id = None
-        if response.status_code == 201:
+        if response.status_code == 202:
             success_count += 1
             transaction_id = response.json().get("id")
 

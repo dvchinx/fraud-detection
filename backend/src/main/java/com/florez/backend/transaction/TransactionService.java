@@ -1,9 +1,9 @@
 package com.florez.backend.transaction;
 
 import com.florez.backend.common.exception.ResourceNotFoundException;
-import com.florez.backend.fraud.FraudEvaluationService;
 import com.florez.backend.user.User;
 import com.florez.backend.user.UserRepository;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,16 +16,16 @@ public class TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final UserRepository userRepository;
-    private final FraudEvaluationService fraudEvaluationService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TransactionService(
             TransactionRepository transactionRepository,
             UserRepository userRepository,
-            FraudEvaluationService fraudEvaluationService
+            ApplicationEventPublisher eventPublisher
     ) {
         this.transactionRepository = transactionRepository;
         this.userRepository = userRepository;
-        this.fraudEvaluationService = fraudEvaluationService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -40,11 +40,10 @@ public class TransactionService {
         transaction.setMerchant(request.merchant());
         transaction.setCountry(request.country());
 
-        FraudEvaluationService.EvaluationResult evaluation = fraudEvaluationService.evaluate(transaction);
-        transaction.setStatus(evaluation.status());
-        transaction.setReason(evaluation.reason());
+        Transaction saved = transactionRepository.save(transaction);
+        eventPublisher.publishEvent(new TransactionCreatedEvent(saved.getId()));
 
-        return TransactionResponse.from(transactionRepository.save(transaction));
+        return TransactionResponse.from(saved);
     }
 
     public TransactionResponse getById(UUID id) {

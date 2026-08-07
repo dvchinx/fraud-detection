@@ -6,6 +6,7 @@ import com.florez.backend.auth.JwtService;
 import com.florez.backend.user.User;
 import com.florez.backend.user.UserRepository;
 import com.florez.backend.user.UserRole;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -60,6 +62,14 @@ class TransactionControllerTest {
         token = jwtService.generateToken(user);
     }
 
+    private TransactionResponse fetchTransaction(UUID id) throws Exception {
+        String responseBody = mockMvc.perform(get("/transactions/" + id)
+                        .header("Authorization", "Bearer " + token))
+                .andReturn().getResponse().getContentAsString();
+
+        return objectMapper.readValue(responseBody, TransactionResponse.class);
+    }
+
     private TransactionResponse createTransaction(BigDecimal amount, String country) throws Exception {
         TransactionRequest request = new TransactionRequest(userId, amount, "USD", "Amazon", country);
 
@@ -67,25 +77,23 @@ class TransactionControllerTest {
                         .header("Authorization", "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
 
-        return objectMapper.readValue(responseBody, TransactionResponse.class);
+        UUID id = objectMapper.readValue(responseBody, TransactionResponse.class).id();
+
+        return Awaitility.await()
+                .atMost(Duration.ofSeconds(10))
+                .pollInterval(Duration.ofMillis(100))
+                .until(() -> fetchTransaction(id), response -> response.status() != TransactionStatus.PENDING);
     }
 
     @Test
     void createAndGetTransaction() throws Exception {
-        TransactionRequest request = new TransactionRequest(userId, new BigDecimal("100.50"), "USD", "Amazon", "US");
+        TransactionResponse created = createTransaction(new BigDecimal("100.50"), "US");
 
-        String responseBody = mockMvc.perform(post("/transactions")
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("APPROVED"))
-                .andExpect(jsonPath("$.reason").value("Ninguna regla activada"))
-                .andReturn().getResponse().getContentAsString();
-
-        TransactionResponse created = objectMapper.readValue(responseBody, TransactionResponse.class);
+        org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.APPROVED, created.status());
+        org.junit.jupiter.api.Assertions.assertEquals("Ninguna regla activada", created.reason());
 
         mockMvc.perform(get("/transactions/" + created.id())
                         .header("Authorization", "Bearer " + token))
@@ -108,15 +116,10 @@ class TransactionControllerTest {
 
     @Test
     void highAmountTransaction_isBlocked() throws Exception {
-        TransactionRequest request = new TransactionRequest(userId, new BigDecimal("15000"), "USD", "Amazon", "US");
+        TransactionResponse response = createTransaction(new BigDecimal("15000"), "US");
 
-        mockMvc.perform(post("/transactions")
-                        .header("Authorization", "Bearer " + token)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(request)))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value("BLOCKED"))
-                .andExpect(jsonPath("$.reason").value(org.hamcrest.Matchers.containsString("bloqueo")));
+        org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.BLOCKED, response.status());
+        org.junit.jupiter.api.Assertions.assertTrue(response.reason().contains("bloqueo"));
     }
 
     @Test
@@ -138,5 +141,14 @@ class TransactionControllerTest {
 
         org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.REVIEW, second.status());
         org.junit.jupiter.api.Assertions.assertTrue(second.reason().contains("País"));
+    }
+
+    @Test
+    void sameCountry_doesNotTriggerGeoReviewAgainstItself() throws Exception {
+        createTransaction(new BigDecimal("10.00"), "US");
+        TransactionResponse second = createTransaction(new BigDecimal("10.00"), "US");
+
+        org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.APPROVED, second.status());
+        org.junit.jupiter.api.Assertions.assertEquals("Ninguna regla activada", second.reason());
     }
 }

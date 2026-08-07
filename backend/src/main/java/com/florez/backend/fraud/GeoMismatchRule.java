@@ -16,7 +16,7 @@ public class GeoMismatchRule implements FraudRule {
     @Override
     public RuleOutcome evaluate(Transaction transaction) {
         return transactionRepository
-                .findTopByUserIdOrderByCreatedAtDesc(transaction.getUser().getId())
+                .findTopByUserIdAndIdNotOrderByCreatedAtDesc(transaction.getUser().getId(), transaction.getId())
                 .filter(previous -> !previous.getCountry().equals(transaction.getCountry()))
                 .map(previous -> RuleOutcome.of(RuleSeverity.REVIEW,
                         "País %s difiere del país de la última transacción (%s)".formatted(

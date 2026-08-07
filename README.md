@@ -10,7 +10,7 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "q
 |---|---|---|
 | 1 | Esqueleto backend — CRUD, autenticación JWT, Postgres | ✅ Completa |
 | 2 | Motor de reglas configurable (monto, velocidad, geolocalización) | ✅ Completa |
-| 3 | Integración Kafka — ingestión asíncrona, generador de volumen | ⏳ Pendiente |
+| 3 | Integración Kafka — ingestión asíncrona, generador de volumen | ✅ Completa |
 | 4 | Servicio de ML (FastAPI) entrenado con datos reales | ⏳ Pendiente (dataset ya validado, ver [`ml/`](ml/)) |
 | 5 | Explicabilidad (SHAP) y dashboard de métricas | ⏳ Pendiente |
 | 6 | Tests de integración, documentación, despliegue | 🔶 En progreso |
@@ -18,27 +18,31 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "q
 ## Arquitectura
 
 ```
-[Cliente/API] ──► [Spring Boot API] ──► [PostgreSQL]   (usuarios, transacciones, decisiones)
-                        │
-                        ├──► [Redis]    (velocity checks del motor de reglas)
-                        │
-                        ├──► [Kafka]    (declarado en el stack, aún sin uso — Fase 3)
-                        │
-                        └──► [Motor de reglas] ──► decisión (APPROVED / REVIEW / BLOCKED) + justificación
+[Cliente/API] ──► [Spring Boot API] ──► [PostgreSQL] (status PENDING)
+                        │                     │
+                        │                     ▼
+                        │            [Kafka: topic "transactions"]
+                        │                     │
+                        │                     ▼
+                        │        [Consumer: motor de reglas] ──► [Redis]    (velocity checks)
+                        │                     │                     │
+                        │                     ▼                     │
+                        └────────► [PostgreSQL] (status final: APPROVED / REVIEW / BLOCKED + reason)
 ```
 
-Flujo de una transacción hoy:
-1. `POST /transactions` con JWT válido.
-2. Se valida y se busca al usuario dueño de la transacción.
-3. El **motor de reglas** la evalúa de forma síncrona (`HighAmountRule`, `VelocityRule`, `GeoMismatchRule`).
-4. Se persiste con su `status` final y el `reason` que explica la decisión — ninguna decisión queda "silenciosa", incluidas las aprobadas.
+Flujo de una transacción hoy (asíncrono):
+1. `POST /transactions` con JWT válido. Se valida y se busca al usuario dueño de la transacción.
+2. Se persiste inmediatamente con `status: PENDING` y se responde **`202 Accepted`** — la ingestión queda desacoplada de la evaluación.
+3. Tras el commit, se publica un evento al topic Kafka `transactions`.
+4. Un **consumer** separado (el motor de reglas: `HighAmountRule`, `VelocityRule`, `GeoMismatchRule`) lee el evento, evalúa la transacción y actualiza su `status` y `reason` en Postgres — ninguna decisión queda "silenciosa", incluidas las aprobadas.
+5. El cliente consulta `GET /transactions/{id}` para ver el resultado final una vez procesado.
 
 ## Stack técnico
 
 - **Backend:** Java 21 + Spring Boot 4.1 (Web, Data JPA, Security, Validation, Data Redis)
 - **Base de datos:** PostgreSQL, migraciones versionadas con Flyway
 - **Cache:** Redis (velocity checks del motor de reglas)
-- **Mensajería:** Kafka (declarado en el stack, se integra en la Fase 3)
+- **Mensajería:** Kafka — topic `transactions`, desacopla la ingestión de la evaluación del motor de reglas
 - **Autenticación:** JWT propio (`jjwt`), passwords con BCrypt
 - **Contenedores:** Docker + docker-compose (Postgres, Redis, Kafka)
 - **Testing:** JUnit 5 + Testcontainers (Postgres, Redis y Kafka reales en los tests de integración)
@@ -69,8 +73,8 @@ Requisitos: Java 21, Docker.
 ```bash
 cd backend
 
-# Levanta Postgres y Redis (Kafka aún no se usa, no hace falta levantarlo)
-docker-compose up -d postgres redis
+# Levanta Postgres, Redis y Kafka
+docker-compose up -d
 
 # Corre la app (los defaults de application.properties ya coinciden con
 # los del docker-compose, no hace falta crear un .env para desarrollo local)
@@ -96,7 +100,7 @@ Requiere Docker activo — los tests levantan Postgres, Redis y Kafka reales ví
 | GET | `/users/{id}` | Detalle de usuario | Sí |
 | GET | `/users` | Listar usuarios | Sí |
 | DELETE | `/users/{id}` | Eliminar usuario | Sí |
-| POST | `/transactions` | Crear transacción (evaluada por el motor de reglas) | Sí |
+| POST | `/transactions` | Crear transacción — responde `202 Accepted` con `status: PENDING`; se evalúa de forma asíncrona (ver `GET /transactions/{id}`) | Sí |
 | GET | `/transactions/{id}` | Detalle de transacción | Sí |
 | GET | `/transactions?userId=` | Listar transacciones (filtrable por usuario) | Sí |
 
@@ -111,15 +115,20 @@ TOKEN=$(curl -s -X POST http://localhost:8080/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"demo@example.com","password":"password123"}' | jq -r .token)
 
-curl -X POST http://localhost:8080/transactions \
+TX_ID=$(curl -s -X POST http://localhost:8080/transactions \
   -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-  -d '{"userId":"<id-del-usuario>","amount":15000,"currency":"USD","merchant":"Amazon","country":"US"}'
+  -d '{"userId":"<id-del-usuario>","amount":15000,"currency":"USD","merchant":"Amazon","country":"US"}' | jq -r .id)
+# -> "status": "PENDING" (aceptada, aún no evaluada)
+
+sleep 2   # tiempo para que el consumer del motor de reglas la procese
+
+curl http://localhost:8080/transactions/$TX_ID -H "Authorization: Bearer $TOKEN"
 # -> "status": "BLOCKED", "reason": "Monto 15000 supera el umbral de bloqueo 10000"
 ```
 
 ## Motor de reglas
 
-Umbrales configurables en `application.properties` (`fraud.rules.*`), sin necesidad de tocar código:
+Corre de forma **asíncrona**, disparado por el consumer de Kafka (`TransactionFraudConsumer`) al recibir el evento de una transacción nueva — ya no en el hilo del request HTTP. Umbrales configurables en `application.properties` (`fraud.rules.*`), sin necesidad de tocar código:
 
 | Regla | Qué evalúa | Umbral por defecto |
 |---|---|---|
@@ -139,6 +148,19 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt        # Windows: .venv\Scripts\pip install -r requirements.txt
 SAMPLE_SIZE=200 .venv/bin/python validate_backend.py   # Windows: .venv\Scripts\python validate_backend.py
 ```
+
+## Simulación de volumen (`ml/generate_load.py`)
+
+Un segundo script ([`ml/generate_load.py`](ml/generate_load.py)) genera tráfico sintético contra la API real para demostrar el pipeline asíncrono end-to-end (ingestión vía `202 Accepted` desacoplada de la evaluación del motor de reglas vía Kafka). Recicla un pool pequeño de usuarios para poder disparar `VelocityRule` y `GeoMismatchRule`, que dependen de actividad repetida por usuario, e inyecta una fracción configurable de transacciones deliberadamente anómalas.
+
+```bash
+cd ml
+.venv/bin/python generate_load.py --rate 10 --duration 30 --users 10 --anomaly-ratio 0.1
+# o, por cantidad fija en vez de duración:
+.venv/bin/python generate_load.py --rate 20 --count 500
+```
+
+Al terminar, imprime el throughput real logrado y, tras una breve espera, la distribución final de `status` (`APPROVED` / `REVIEW` / `BLOCKED`) sobre una muestra de las transacciones enviadas — evidencia de que el pipeline async efectivamente resolvió las decisiones.
 
 ## Licencia
 
