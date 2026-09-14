@@ -1,0 +1,3 @@
+-r requirements.txt
+datasets>=2.19
+requests>=2.31

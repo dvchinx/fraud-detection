@@ -1,0 +1,25 @@
+{
+  "modelVersion": "logreg-v1",
+  "trainedAt": "2026-09-13T23:46:22.858039+00:00",
+  "features": [
+    "amount",
+    "log_amount",
+    "hour_of_day",
+    "day_of_week",
+    "is_weekend"
+  ],
+  "trainRows": 300000,
+  "testRows": 100000,
+  "trainFraudRate": 0.007516666666666666,
+  "metrics": {
+    "rocAuc": 0.8369721654184149,
+    "prAuc": 0.12810427753838968,
+    "precisionFraud": 0.07406444906444906,
+    "recallFraud": 0.7089552238805971,
+    "f1Fraud": 0.13411764705882354
+  },
+  "suggestedThresholds": {
+    "review": 0.5,
+    "block": 0.85
+  }
+}
