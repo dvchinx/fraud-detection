@@ -61,4 +61,14 @@ public class TransactionService {
                 .map(TransactionResponse::from)
                 .toList();
     }
+
+    @Transactional
+    public TransactionResponse confirmFraud(UUID id, boolean confirmedFraud) {
+        Transaction transaction = transactionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Transacción no encontrada: " + id));
+
+        transaction.setConfirmedFraud(confirmedFraud);
+
+        return TransactionResponse.from(transactionRepository.save(transaction));
+    }
 }

@@ -1,5 +1,6 @@
 package com.florez.backend.fraud;
 
+import com.florez.backend.transaction.FeatureContribution;
 import com.florez.backend.transaction.Transaction;
 import com.florez.backend.transaction.TransactionCreatedMessage;
 import com.florez.backend.transaction.TransactionKafkaConfig;
@@ -10,6 +11,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
 
 @Component
 public class TransactionFraudConsumer {
@@ -46,6 +49,19 @@ public class TransactionFraudConsumer {
         FraudEvaluationService.EvaluationResult evaluation = fraudEvaluationService.evaluate(transaction);
         transaction.setStatus(evaluation.status());
         transaction.setReason(evaluation.reason());
+        transaction.setDecidedAt(Instant.now());
+        transaction.setRuleOutcomes(evaluation.triggeredRules());
+
+        MlScoreResponse mlScore = evaluation.mlScore();
+        if (mlScore != null) {
+            transaction.setMlRiskScore(mlScore.riskScore());
+            transaction.setMlModelVersion(mlScore.modelVersion());
+            transaction.setMlBaseValue(mlScore.baseValue());
+            transaction.setMlTopFactors(mlScore.topFactors().stream()
+                    .map(factor -> new FeatureContribution(factor.feature(), factor.contribution()))
+                    .toList());
+        }
+
         transactionRepository.save(transaction);
     }
 }

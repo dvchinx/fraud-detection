@@ -18,4 +18,5 @@ class FeatureContribution(BaseModel):
 class ScoreResponse(BaseModel):
     riskScore: float
     modelVersion: str
+    baseValue: float
     topFactors: list[FeatureContribution]

@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -94,6 +95,8 @@ class TransactionControllerTest {
 
         org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.APPROVED, created.status());
         org.junit.jupiter.api.Assertions.assertEquals("Ninguna regla activada", created.reason());
+        org.junit.jupiter.api.Assertions.assertNotNull(created.decidedAt());
+        org.junit.jupiter.api.Assertions.assertTrue(created.ruleOutcomes().isEmpty());
 
         mockMvc.perform(get("/transactions/" + created.id())
                         .header("Authorization", "Bearer " + token))
@@ -120,6 +123,23 @@ class TransactionControllerTest {
 
         org.junit.jupiter.api.Assertions.assertEquals(TransactionStatus.BLOCKED, response.status());
         org.junit.jupiter.api.Assertions.assertTrue(response.reason().contains("bloqueo"));
+        org.junit.jupiter.api.Assertions.assertEquals(1, response.ruleOutcomes().size());
+        org.junit.jupiter.api.Assertions.assertEquals("HighAmountRule", response.ruleOutcomes().get(0).rule());
+    }
+
+    @Test
+    void confirmFraud_persistsGroundTruthLabel() throws Exception {
+        TransactionResponse created = createTransaction(new BigDecimal("50.00"), "US");
+
+        String responseBody = mockMvc.perform(patch("/transactions/" + created.id() + "/confirmed-fraud")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"confirmedFraud\": true}"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        TransactionResponse updated = objectMapper.readValue(responseBody, TransactionResponse.class);
+        org.junit.jupiter.api.Assertions.assertEquals(Boolean.TRUE, updated.confirmedFraud());
     }
 
     @Test

@@ -5,6 +5,7 @@ import java.util.List;
 public record MlScoreResponse(
         double riskScore,
         String modelVersion,
+        double baseValue,
         List<FeatureContribution> topFactors
 ) {
 

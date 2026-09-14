@@ -15,10 +15,13 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -58,6 +61,29 @@ public class Transaction {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @Column(name = "decided_at")
+    private Instant decidedAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "rule_outcomes", columnDefinition = "jsonb")
+    private List<RuleTrigger> ruleOutcomes;
+
+    @Column(name = "ml_risk_score")
+    private Double mlRiskScore;
+
+    @Column(name = "ml_model_version")
+    private String mlModelVersion;
+
+    @Column(name = "ml_base_value")
+    private Double mlBaseValue;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "ml_top_factors", columnDefinition = "jsonb")
+    private List<FeatureContribution> mlTopFactors;
+
+    @Column(name = "confirmed_fraud")
+    private Boolean confirmedFraud;
 
     @PrePersist
     void onCreate() {

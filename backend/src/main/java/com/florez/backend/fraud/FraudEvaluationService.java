@@ -1,10 +1,12 @@
 package com.florez.backend.fraud;
 
+import com.florez.backend.transaction.RuleTrigger;
 import com.florez.backend.transaction.Transaction;
 import com.florez.backend.transaction.TransactionStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -17,22 +19,47 @@ public class FraudEvaluationService {
     }
 
     public EvaluationResult evaluate(Transaction transaction) {
-        List<RuleOutcome> triggered = rules.stream()
-                .map(rule -> rule.evaluate(transaction))
-                .filter(RuleOutcome::triggered)
+        List<RuleEvaluation> evaluations = rules.stream()
+                .map(rule -> new RuleEvaluation(rule.getClass().getSimpleName(), rule.evaluate(transaction)))
                 .toList();
 
+        List<RuleEvaluation> triggered = evaluations.stream()
+                .filter(evaluation -> evaluation.outcome().triggered())
+                .toList();
+
+        TransactionStatus status;
+        String reason;
         if (triggered.isEmpty()) {
-            return new EvaluationResult(TransactionStatus.APPROVED, "Ninguna regla activada");
+            status = TransactionStatus.APPROVED;
+            reason = "Ninguna regla activada";
+        } else {
+            boolean anyBlock = triggered.stream().anyMatch(evaluation -> evaluation.outcome().severity() == RuleSeverity.BLOCK);
+            status = anyBlock ? TransactionStatus.BLOCKED : TransactionStatus.REVIEW;
+            reason = triggered.stream().map(evaluation -> evaluation.outcome().reason()).collect(Collectors.joining("; "));
         }
 
-        boolean anyBlock = triggered.stream().anyMatch(outcome -> outcome.severity() == RuleSeverity.BLOCK);
-        TransactionStatus status = anyBlock ? TransactionStatus.BLOCKED : TransactionStatus.REVIEW;
-        String reason = triggered.stream().map(RuleOutcome::reason).collect(Collectors.joining("; "));
+        List<RuleTrigger> triggeredRules = triggered.stream()
+                .map(evaluation -> new RuleTrigger(
+                        evaluation.ruleName(), evaluation.outcome().severity().name(), evaluation.outcome().reason()))
+                .toList();
 
-        return new EvaluationResult(status, reason);
+        MlScoreResponse mlScore = evaluations.stream()
+                .map(evaluation -> evaluation.outcome().mlScore())
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+
+        return new EvaluationResult(status, reason, triggeredRules, mlScore);
     }
 
-    public record EvaluationResult(TransactionStatus status, String reason) {
+    private record RuleEvaluation(String ruleName, RuleOutcome outcome) {
+    }
+
+    public record EvaluationResult(
+            TransactionStatus status,
+            String reason,
+            List<RuleTrigger> triggeredRules,
+            MlScoreResponse mlScore
+    ) {
     }
 }

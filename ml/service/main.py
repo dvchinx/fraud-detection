@@ -13,9 +13,10 @@ def health():
 
 @app.post("/score", response_model=ScoreResponse)
 def score_transaction(request: ScoreRequest) -> ScoreResponse:
-    risk_score, top_factors = model.score(request.amount, request.timestamp)
+    risk_score, base_value, top_factors = model.score(request.amount, request.timestamp)
     return ScoreResponse(
         riskScore=risk_score,
         modelVersion=model.MODEL_VERSION,
+        baseValue=base_value,
         topFactors=top_factors,
     )

@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,5 +42,10 @@ public class TransactionController {
     @GetMapping
     public List<TransactionResponse> getAll(@RequestParam(required = false) UUID userId) {
         return transactionService.getAll(userId);
+    }
+
+    @PatchMapping("/{id}/confirmed-fraud")
+    public TransactionResponse confirmFraud(@PathVariable UUID id, @Valid @RequestBody ConfirmFraudRequest request) {
+        return transactionService.confirmFraud(id, request.confirmedFraud());
     }
 }

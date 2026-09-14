@@ -25,13 +25,15 @@ public class MlScoringRule implements FraudRule {
         if (score.riskScore() >= properties.getMlBlockThreshold()) {
             return RuleOutcome.of(RuleSeverity.BLOCK,
                     "Modelo ML (%s) score=%.2f supera el umbral de bloqueo %.2f".formatted(
-                            score.modelVersion(), score.riskScore(), properties.getMlBlockThreshold()));
+                            score.modelVersion(), score.riskScore(), properties.getMlBlockThreshold()),
+                    score);
         }
         if (score.riskScore() >= properties.getMlReviewThreshold()) {
             return RuleOutcome.of(RuleSeverity.REVIEW,
                     "Modelo ML (%s) score=%.2f supera el umbral de revisión %.2f".formatted(
-                            score.modelVersion(), score.riskScore(), properties.getMlReviewThreshold()));
+                            score.modelVersion(), score.riskScore(), properties.getMlReviewThreshold()),
+                    score);
         }
-        return RuleOutcome.clean();
+        return RuleOutcome.cleanWithScore(score);
     }
 }
