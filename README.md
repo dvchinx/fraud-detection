@@ -1,6 +1,6 @@
 # Fraud Detection Platform
 
-Plataforma de **detección de fraude en transacciones en tiempo real** para el sector financiero. Recibe transacciones, las evalúa contra un motor de reglas configurable (y, en fases futuras, un modelo de ML), y decide **aprobar / bloquear / marcar para revisión manual** — siempre dejando registrada la justificación de la decisión.
+Plataforma de **detección de fraude en transacciones en tiempo real** para el sector financiero. Recibe transacciones, las evalúa contra un motor de reglas configurable y un modelo de ML explicable, y decide **aprobar / bloquear / marcar para revisión manual** — siempre dejando registrada la justificación de la decisión.
 
 Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "que funcione", sino demostrar diseño de arquitectura backend robusta, manejo de flujos configurables, y una integración seria de ML en un sistema productivo (no un notebook aislado).
 
@@ -13,28 +13,53 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "q
 | 3 | Integración Kafka — ingestión asíncrona, generador de volumen | ✅ Completa |
 | 4 | Servicio de ML (FastAPI) entrenado con datos reales | ✅ Completa |
 | 5 | Explicabilidad (SHAP) y dashboard de métricas | ✅ Completa |
-| 6 | Tests de integración, documentación, despliegue | 🔶 En progreso |
+| 6 | Tests de integración, observabilidad, documentación y despliegue | ✅ Completa |
 
 ## Arquitectura
 
-```
-[Cliente/API] ──► [Spring Boot API] ──► [PostgreSQL] (status PENDING)
-                        │                     │
-                        │                     ▼
-                        │            [Kafka: topic "transactions"]
-                        │                     │
-                        │                     ▼
-                        │        [Consumer: motor de reglas] ──► [Redis]           (velocity checks)
-                        │                     │               └► [ML Service FastAPI] (risk score)
-                        │                     ▼                     │
-                        └────────► [PostgreSQL] (status final: APPROVED / REVIEW / BLOCKED + reason)
+```mermaid
+flowchart LR
+    Client([Cliente]) -->|"POST /transactions<br/>202 Accepted"| API["Spring Boot API"]
+    API -->|"status: PENDING"| PG[("PostgreSQL")]
+    API -->|"TransactionCreatedEvent"| K{{"Kafka<br/>topic: transactions"}}
+    K --> W["Consumer<br/>motor de reglas"]
+    W -->|"velocity checks"| R[("Redis")]
+    W -->|"POST /score"| ML["ML Service (FastAPI)<br/>LogisticRegression + SHAP"]
+    W -->|"status final + explicación"| PG
+    Client -->|"GET /transactions/{id}"| API
+    Client -->|"GET /metrics/summary"| API
 ```
 
 Flujo de una transacción hoy (asíncrono):
+
+```mermaid
+sequenceDiagram
+    participant C as Cliente
+    participant API as Spring Boot API
+    participant DB as PostgreSQL
+    participant K as Kafka
+    participant W as Consumer (reglas)
+    participant R as Redis
+    participant ML as ML Service
+
+    C->>API: POST /transactions (JWT)
+    API->>DB: INSERT status=PENDING
+    API-->>C: 202 Accepted
+    API->>K: TransactionCreatedEvent (post-commit)
+    K->>W: consume
+    W->>R: velocity check del usuario
+    W->>DB: última transacción del usuario (geo)
+    W->>ML: POST /score
+    ML-->>W: riskScore + valores SHAP
+    W->>DB: status final + reason + ruleOutcomes + SHAP
+    C->>API: GET /transactions/{id}
+    API-->>C: decisión + explicación completa
+```
+
 1. `POST /transactions` con JWT válido. Se valida y se busca al usuario dueño de la transacción.
 2. Se persiste inmediatamente con `status: PENDING` y se responde **`202 Accepted`** — la ingestión queda desacoplada de la evaluación.
 3. Tras el commit, se publica un evento al topic Kafka `transactions`.
-4. Un **consumer** separado lee el evento y evalúa la transacción contra el motor de reglas: `HighAmountRule`, `VelocityRule`, `GeoMismatchRule` y `MlScoringRule` (que le pide un score de riesgo al servicio de ML). Actualiza `status` y `reason` en Postgres — ninguna decisión queda "silenciosa", incluidas las aprobadas.
+4. Un **consumer** separado lee el evento y evalúa la transacción contra el motor de reglas: `HighAmountRule`, `VelocityRule`, `GeoMismatchRule` y `MlScoringRule` (que le pide un score de riesgo al servicio de ML). Actualiza `status`, `reason` y la explicación estructurada en Postgres — ninguna decisión queda "silenciosa", incluidas las aprobadas.
 5. El cliente consulta `GET /transactions/{id}` para ver el resultado final una vez procesado.
 
 ## Stack técnico
@@ -44,9 +69,10 @@ Flujo de una transacción hoy (asíncrono):
 - **Cache:** Redis (velocity checks del motor de reglas)
 - **Mensajería:** Kafka — topic `transactions`, desacopla la ingestión de la evaluación del motor de reglas
 - **Autenticación:** JWT propio (`jjwt`), passwords con BCrypt
-- **Contenedores:** Docker + docker-compose (Postgres, Redis, Kafka, ML service)
+- **Contenedores:** Docker + docker-compose — Postgres, Redis, Kafka, el servicio de ML y (con el perfil `full`) la propia API
 - **Testing:** JUnit 5 + Testcontainers (Postgres, Redis y Kafka reales en los tests de integración)
-- **Servicio de ML:** Python + FastAPI, `scikit-learn` (LogisticRegression interpretable), entrenado con un dataset real de fraude de Hugging Face (ver [`ml/`](ml/))
+- **Observabilidad:** Spring Actuator + Micrometer (registro Prometheus), logs estructurados en JSON dentro del contenedor
+- **Servicio de ML:** Python + FastAPI, `scikit-learn` (LogisticRegression interpretable) + `shap` para explicabilidad, entrenado con un dataset real de fraude de Hugging Face (ver [`ml/`](ml/))
 
 ## Estructura del repo
 
@@ -62,13 +88,27 @@ Dentro de `backend/`, los paquetes están organizados por **dominio** (no por ca
 auth/          registro, login, JWT, configuración de Security
 user/          entidad de usuario y su CRUD
 transaction/   entidad de transacción, DTOs, endpoints
-fraud/         motor de reglas (HighAmountRule, VelocityRule, GeoMismatchRule)
+fraud/         motor de reglas (HighAmountRule, VelocityRule, GeoMismatchRule, MlScoringRule)
+metrics/       dashboard de métricas de negocio
 common/        manejo de errores centralizado (@ControllerAdvice)
 ```
 
 ## Cómo correrlo localmente
 
 Requisitos: Java 21, Docker.
+
+### Opción A — stack completo en contenedores
+
+Todo (incluida la API) se levanta con un solo comando, sin necesidad de tener Java instalado:
+
+```bash
+cd backend
+docker-compose --profile full up -d --build
+```
+
+### Opción B — infraestructura en Docker, API en local
+
+Es la más cómoda para desarrollar, porque permite recompilar y depurar la API sin reconstruir imágenes:
 
 ```bash
 cd backend
@@ -81,7 +121,7 @@ docker-compose up -d
 ./mvnw spring-boot:run
 ```
 
-La API queda disponible en `http://localhost:8080`. El servicio de ML queda en `http://localhost:8000` (`GET /health`, `POST /score`).
+En ambos casos la API queda en `http://localhost:8080` y el servicio de ML en `http://localhost:8000` (`GET /health`, `POST /score`). Kafka expone dos listeners: `kafka:19092` para el tráfico entre contenedores y `localhost:9092` para clientes en el host (la API corrida en local y los scripts de `ml/`), así que ambas opciones conviven sin tocar configuración.
 
 ### Correr los tests
 
@@ -89,7 +129,18 @@ La API queda disponible en `http://localhost:8080`. El servicio de ML queda en `
 ./mvnw test
 ```
 
-Requiere Docker activo — los tests levantan Postgres, Redis y Kafka reales vía Testcontainers (no mocks).
+Requiere Docker activo — los tests levantan Postgres, Redis y Kafka reales vía Testcontainers (no mocks). La suite cubre:
+
+- **Integración end-to-end** del pipeline asíncrono: ingesta → Kafka → motor de reglas → decisión persistida (`TransactionControllerTest`).
+- **Camino feliz del servicio de ML** contra un stub HTTP, verificando que el score y los valores SHAP quedan persistidos y que la decisión sale del modelo (`MlScoringIntegrationTest`). El resto de los tests corre sin servicio de ML, lo que ejercita el comportamiento *fail-open*.
+- **Motor de reglas en aislamiento**, sin contexto de Spring (`FraudEvaluationServiceTest`): precedencia de severidades, justificación de cada decisión y trazabilidad por regla.
+- **Dashboard de métricas** incluyendo el cálculo de falsos positivos sobre ground truth confirmado (`MetricsControllerTest`).
+
+## Observabilidad
+
+- `GET /actuator/health` — público, lo usan los healthchecks de docker-compose.
+- `GET /actuator/metrics` y `GET /actuator/prometheus` — detrás del JWT, como el resto de la API. En un despliegue real irían en un puerto de management separado, no expuesto públicamente.
+- Dentro del contenedor los logs salen en **JSON** (formato ECS, vía `LOGGING_STRUCTURED_FORMAT_CONSOLE`), listos para un colector tipo ELK; en local siguen siendo legibles para humanos.
 
 ## Endpoints
 

@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -110,8 +111,34 @@ class MetricsControllerTest {
     }
 
     @Test
+    void summary_countsConfirmedFraudAsGroundTruth() throws Exception {
+        TransactionResponse blocked = createTransaction(new BigDecimal("15000"));
+        confirmFraud(blocked.id(), false);
+
+        String responseBody = mockMvc.perform(get("/metrics/summary")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        MetricsSummaryResponse summary = objectMapper.readValue(responseBody, MetricsSummaryResponse.class);
+
+        // Bloqueada pero confirmada como legítima => falso positivo.
+        Assertions.assertTrue(summary.fraudDetection().labeledTransactions() >= 1);
+        Assertions.assertTrue(summary.fraudDetection().falsePositives() >= 1);
+        Assertions.assertNotNull(summary.fraudDetection().precision());
+    }
+
+    @Test
     void summary_withoutToken_returnsUnauthorized() throws Exception {
         mockMvc.perform(get("/metrics/summary"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    private void confirmFraud(UUID id, boolean confirmedFraud) throws Exception {
+        mockMvc.perform(patch("/transactions/" + id + "/confirmed-fraud")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"confirmedFraud\": " + confirmedFraud + "}"))
+                .andExpect(status().isOk());
     }
 }
