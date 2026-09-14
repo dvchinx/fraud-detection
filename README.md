@@ -11,7 +11,7 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "q
 | 1 | Esqueleto backend — CRUD, autenticación JWT, Postgres | ✅ Completa |
 | 2 | Motor de reglas configurable (monto, velocidad, geolocalización) | ✅ Completa |
 | 3 | Integración Kafka — ingestión asíncrona, generador de volumen | ✅ Completa |
-| 4 | Servicio de ML (FastAPI) entrenado con datos reales | ⏳ Pendiente (dataset ya validado, ver [`ml/`](ml/)) |
+| 4 | Servicio de ML (FastAPI) entrenado con datos reales | ✅ Completa |
 | 5 | Explicabilidad (SHAP) y dashboard de métricas | ⏳ Pendiente |
 | 6 | Tests de integración, documentación, despliegue | 🔶 En progreso |
 
@@ -24,8 +24,8 @@ Proyecto de portafolio orientado a roles **Backend + IA**: el foco no es solo "q
                         │            [Kafka: topic "transactions"]
                         │                     │
                         │                     ▼
-                        │        [Consumer: motor de reglas] ──► [Redis]    (velocity checks)
-                        │                     │                     │
+                        │        [Consumer: motor de reglas] ──► [Redis]           (velocity checks)
+                        │                     │               └► [ML Service FastAPI] (risk score)
                         │                     ▼                     │
                         └────────► [PostgreSQL] (status final: APPROVED / REVIEW / BLOCKED + reason)
 ```
@@ -34,7 +34,7 @@ Flujo de una transacción hoy (asíncrono):
 1. `POST /transactions` con JWT válido. Se valida y se busca al usuario dueño de la transacción.
 2. Se persiste inmediatamente con `status: PENDING` y se responde **`202 Accepted`** — la ingestión queda desacoplada de la evaluación.
 3. Tras el commit, se publica un evento al topic Kafka `transactions`.
-4. Un **consumer** separado (el motor de reglas: `HighAmountRule`, `VelocityRule`, `GeoMismatchRule`) lee el evento, evalúa la transacción y actualiza su `status` y `reason` en Postgres — ninguna decisión queda "silenciosa", incluidas las aprobadas.
+4. Un **consumer** separado lee el evento y evalúa la transacción contra el motor de reglas: `HighAmountRule`, `VelocityRule`, `GeoMismatchRule` y `MlScoringRule` (que le pide un score de riesgo al servicio de ML). Actualiza `status` y `reason` en Postgres — ninguna decisión queda "silenciosa", incluidas las aprobadas.
 5. El cliente consulta `GET /transactions/{id}` para ver el resultado final una vez procesado.
 
 ## Stack técnico
@@ -44,15 +44,15 @@ Flujo de una transacción hoy (asíncrono):
 - **Cache:** Redis (velocity checks del motor de reglas)
 - **Mensajería:** Kafka — topic `transactions`, desacopla la ingestión de la evaluación del motor de reglas
 - **Autenticación:** JWT propio (`jjwt`), passwords con BCrypt
-- **Contenedores:** Docker + docker-compose (Postgres, Redis, Kafka)
+- **Contenedores:** Docker + docker-compose (Postgres, Redis, Kafka, ML service)
 - **Testing:** JUnit 5 + Testcontainers (Postgres, Redis y Kafka reales en los tests de integración)
-- **Validación de datos:** script en Python que valida el backend contra un dataset real de fraude de Hugging Face (ver [`ml/`](ml/))
+- **Servicio de ML:** Python + FastAPI, `scikit-learn` (LogisticRegression interpretable), entrenado con un dataset real de fraude de Hugging Face (ver [`ml/`](ml/))
 
 ## Estructura del repo
 
 ```
 backend/    Spring Boot — API REST, motor de reglas, persistencia
-ml/         Script Python de validación con dataset real de Hugging Face
+ml/         Servicio de ML (FastAPI) + entrenamiento + scripts de validación/carga
 CLAUDE.md   Guía de arquitectura y convenciones del proyecto
 ```
 
@@ -73,7 +73,7 @@ Requisitos: Java 21, Docker.
 ```bash
 cd backend
 
-# Levanta Postgres, Redis y Kafka
+# Levanta Postgres, Redis, Kafka y el servicio de ML (FastAPI)
 docker-compose up -d
 
 # Corre la app (los defaults de application.properties ya coinciden con
@@ -81,7 +81,7 @@ docker-compose up -d
 ./mvnw spring-boot:run
 ```
 
-La API queda disponible en `http://localhost:8080`.
+La API queda disponible en `http://localhost:8080`. El servicio de ML queda en `http://localhost:8000` (`GET /health`, `POST /score`).
 
 ### Correr los tests
 
@@ -135,12 +135,40 @@ Corre de forma **asíncrona**, disparado por el consumer de Kafka (`TransactionF
 | `HighAmountRule` | Monto de la transacción | `> 1000` → revisión, `> 10000` → bloqueo |
 | `VelocityRule` | Transacciones del mismo usuario en una ventana de tiempo (Redis) | `> 5` en `300s` → revisión |
 | `GeoMismatchRule` | País distinto al de la última transacción del usuario | cualquier cambio → revisión |
+| `MlScoringRule` | Score de riesgo devuelto por el [servicio de ML](#servicio-de-ml-ml) (Fase 4) | `>= 0.5` → revisión, `>= 0.85` → bloqueo |
 
 Si ninguna regla se activa, la transacción queda `APPROVED` con el motivo `"Ninguna regla activada"` — toda decisión, incluso la positiva, queda justificada.
 
+`MlScoringRule` es **fail-open**: si el servicio de ML no responde a tiempo (timeout configurable, default 2s) o está caído, se loguea un `WARN` y esa regla simplemente no aporta nada a la decisión — no bloquea el pipeline asíncrono ni tira abajo la evaluación del resto de las reglas.
+
+## Servicio de ML (`ml/`)
+
+Microservicio Python + FastAPI, separado del backend Java (corre en su propio proceso/contenedor), que expone:
+
+- `POST /score` — recibe `{ amount, merchant, country, timestamp }` y devuelve `{ riskScore, modelVersion, topFactors }`. `topFactors` son las features con mayor contribución al score (coeficiente × valor escalado), para no dejar el modelo como caja negra incluso antes de integrar SHAP (Fase 5).
+- `GET /health` — chequeo de salud.
+
+**Modelo:** `LogisticRegression` (interpretable, `class_weight="balanced"`) dentro de un `Pipeline` con `StandardScaler`, entrenado con el dataset real [`pointe77/credit-card-transaction`](https://huggingface.co/datasets/pointe77/credit-card-transaction) (mismo dataset ya usado en `validate_backend.py`), usando los splits `train`/`test` reales del dataset. Métricas actuales (ver `ml/model/metadata.json`): ROC-AUC ≈ 0.84, recall de fraude ≈ 0.71.
+
+**Límite de diseño conocido (paridad train/serve):** `POST /transactions` del backend solo captura `amount`, `merchant`, `country` y `currency` — no la categoría, geolocalización ni demografía que sí tiene el dataset completo. Para no entrenar con columnas que nunca van a existir en producción, el modelo v1 solo usa **features reproducibles en tiempo real**: el monto y features derivadas del timestamp (`log_amount`, `hour_of_day`, `day_of_week`, `is_weekend`). Enriquecer el modelo con las señales que ya calculan `VelocityRule`/`GeoMismatchRule` es un candidato natural para la Fase 5.
+
+```bash
+cd ml
+
+# Servir el modelo ya entrenado (commiteado en ml/model/)
+.venv/Scripts/pip install -r requirements.txt   # Linux/Mac: .venv/bin/pip
+.venv/Scripts/uvicorn service.main:app --port 8000   # Linux/Mac: .venv/bin/uvicorn
+
+# Reentrenar (descarga el dataset de Hugging Face, sobreescribe ml/model/)
+.venv/Scripts/pip install -r requirements-train.txt
+.venv/Scripts/python train_model.py
+```
+
+El `Dockerfile` en `ml/` construye la imagen de *serving* (solo `requirements.txt`, sin las dependencias de entrenamiento) y es la que usa `docker-compose.yml`.
+
 ## Validación con dataset real (`ml/`)
 
-Un script en Python ([`ml/validate_backend.py`](ml/validate_backend.py)) toma una muestra del dataset [`pointe77/credit-card-transaction`](https://huggingface.co/datasets/pointe77/credit-card-transaction) (Hugging Face) y la envía contra la API real, para validar que el modelo de datos tolera transacciones con forma real. El mismo dataset se reutilizará para entrenar el modelo de ML en la Fase 4.
+Un script en Python ([`ml/validate_backend.py`](ml/validate_backend.py)) toma una muestra del dataset [`pointe77/credit-card-transaction`](https://huggingface.co/datasets/pointe77/credit-card-transaction) (Hugging Face) y la envía contra la API real, para validar que el modelo de datos tolera transacciones con forma real. El mismo dataset se reutiliza para entrenar el modelo de ML (ver [Servicio de ML](#servicio-de-ml-ml)).
 
 ```bash
 cd ml
