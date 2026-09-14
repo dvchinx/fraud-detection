@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -27,9 +28,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Apunta el cliente de ML a un puerto cerrado a proposito: estos tests verifican
+ * las reglas de negocio, asi que el modelo debe quedar siempre fuera de juego
+ * (fail-open). Sin esto el resultado cambia segun si el dev tiene levantado el
+ * servicio de ML en localhost:8000.
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
+@TestPropertySource(properties = "ml.service.url=http://localhost:9")
 class TransactionControllerTest {
 
     @Autowired

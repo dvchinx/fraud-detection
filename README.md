@@ -121,7 +121,7 @@ docker-compose up -d
 ./mvnw spring-boot:run
 ```
 
-En ambos casos la API queda en `http://localhost:8080` y el servicio de ML en `http://localhost:8000` (`GET /health`, `POST /score`). Kafka expone dos listeners: `kafka:19092` para el tráfico entre contenedores y `localhost:9092` para clientes en el host (la API corrida en local y los scripts de `ml/`), así que ambas opciones conviven sin tocar configuración.
+En ambos casos la API queda en `http://localhost:8080` (abre esa URL en el navegador para el [dashboard](#dashboard-web)) y el servicio de ML en `http://localhost:8000` (`GET /health`, `POST /score`). Kafka expone dos listeners: `kafka:19092` para el tráfico entre contenedores y `localhost:9092` para clientes en el host (la API corrida en local y los scripts de `ml/`), así que ambas opciones conviven sin tocar configuración.
 
 ### Correr los tests
 
@@ -146,6 +146,7 @@ Requiere Docker activo — los tests levantan Postgres, Redis y Kafka reales ví
 
 | Método | Ruta | Descripción | Auth |
 |---|---|---|---|
+| GET | `/` | [Dashboard web](#dashboard-web) (shell estático; los datos los pide con el JWT) | No |
 | POST | `/auth/register` | Registrar usuario | No |
 | POST | `/auth/login` | Login, devuelve JWT | No |
 | GET | `/users/{id}` | Detalle de usuario | Sí |
@@ -221,6 +222,19 @@ Ninguna decisión queda "silenciosa": además del `reason` legible, cada transac
   ]
 }
 ```
+
+## Dashboard web
+
+Abrir `http://localhost:8080` sirve un dashboard que consume la propia API. Es una única página estática (`backend/src/main/resources/static/index.html`) servida por Spring Boot: **sin build step, sin dependencias externas, sin CDN** — sólo HTML, CSS y JS plano, para no arrastrar un toolchain de frontend a un proyecto Backend + IA.
+
+Se entra con cualquier usuario de la API (`POST /auth/register` si aún no tienes uno) y muestra:
+
+- **KPIs**: transacciones evaluadas, latencia media y p95 de decisión, score de riesgo promedio y falsos positivos.
+- **Distribución de decisiones** — barra apilada con la paleta semántica de estado (aprobado / revisión / bloqueado), con icono y etiqueta además del color.
+- **Reglas más activadas** — barras horizontales, una sola serie.
+- **Transacciones recientes** — al seleccionar una fila se abre su explicación: las reglas que se activaron y un **gráfico divergente de valores SHAP** (rojo empuja hacia fraude, azul en contra) sobre el `baseValue` del modelo.
+
+Detalles de implementación que vale la pena mencionar: el shell HTML es público pero **todos los datos se piden con el JWT** (`/metrics/summary` y `/transactions` siguen devolviendo 401 sin token); las etiquetas dentro de las barras se miden antes de pintarse y se omiten si no caben, en vez de recortarse; cada gráfico tiene su equivalente en tabla; y hay modo oscuro automático según el sistema.
 
 ## Dashboard de métricas de negocio (Fase 5)
 

@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fraud Detection · Dashboard</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface-1:      #fcfcfb;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series-1:       #2a78d6;
+    --shap-pos:       #e34948;
+    --shap-neg:       #2a78d6;
+    --status-good:     #0ca30c;
+    --status-warning:  #fab219;
+    --status-critical: #d03b3b;
+    --status-neutral:  #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface-1:      #1a1a19;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series-1:       #3987e5;
+      --shap-pos:       #e66767;
+      --shap-neg:       #3987e5;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-block: 24px; padding-inline: 16px; }
+
+  header.top { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; margin-bottom: 20px; }
+  header.top h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header.top p { margin: 2px 0 0; color: var(--text-secondary); font-size: 13px; }
+  .top-actions { display: flex; gap: 8px; align-items: center; }
+
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; padding: 7px 12px;
+    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  }
+  button:hover { border-color: var(--baseline); }
+  button.primary { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+  button.link { border: none; background: none; padding: 4px 6px; color: var(--text-secondary); text-decoration: underline; }
+
+  .card {
+    background: var(--surface-1); border: 1px solid var(--border);
+    border-radius: 12px; padding: 18px; margin-bottom: 16px;
+  }
+  .card > h2 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
+  .card > .sub { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 16px; }
+
+  /* ---------- Hero + stat tiles ---------- */
+  .hero-row { display: grid; grid-template-columns: minmax(200px, 1fr) 2fr; gap: 16px; align-items: stretch; }
+  .hero .label { color: var(--text-secondary); font-size: 13px; }
+  .hero .value { font-size: 52px; font-weight: 600; line-height: 1.05; margin-top: 6px; letter-spacing: -0.02em; }
+  .hero .foot { color: var(--text-muted); font-size: 12.5px; margin-top: 6px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+  .tile .label { color: var(--text-secondary); font-size: 12.5px; }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .tile .foot { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+  /* ---------- Charts ---------- */
+  .stack { display: flex; width: 100%; height: 22px; }
+  .stack .seg {
+    height: 100%; position: relative; display: flex; align-items: center; justify-content: center;
+    font-size: 11.5px; font-weight: 600; overflow: visible;
+  }
+  /* Surface gap: 2px of page surface between touching segments */
+  .stack .seg + .seg { margin-left: 2px; }
+  .stack .seg:first-child { border-radius: 2px 0 0 2px; }
+  .stack .seg:last-child  { border-radius: 0 4px 4px 0; }
+  .stack .seg:only-child  { border-radius: 2px 4px 4px 2px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 14px; }
+  .legend .item { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--text-secondary); }
+  .legend .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .legend .icon { font-weight: 700; font-size: 11px; color: var(--text-secondary); width: 10px; text-align: center; }
+  .legend .val { color: var(--text-primary); font-weight: 600; }
+
+  .bars { display: flex; flex-direction: column; gap: 10px; }
+  .bar-row { display: grid; grid-template-columns: 148px 1fr auto; gap: 12px; align-items: center; }
+  .bar-row .name { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+  .bar-track { background: transparent; }
+  .bar-fill { height: 18px; background: var(--series-1); border-radius: 2px 4px 4px 2px; }
+  .bar-row .val { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-primary); min-width: 32px; text-align: right; }
+
+  /* ---------- SHAP diverging ---------- */
+  .shap-row { display: grid; grid-template-columns: 116px 1fr 68px; gap: 12px; align-items: center; }
+  .shap-track { position: relative; height: 20px; }
+  .shap-zero { position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: var(--baseline); }
+  .shap-fill { position: absolute; top: 1px; height: 18px; }
+  .shap-fill.pos { background: var(--shap-pos); border-radius: 2px 4px 4px 2px; }
+  .shap-fill.neg { background: var(--shap-neg); border-radius: 4px 2px 2px 4px; }
+
+  /* ---------- Table ---------- */
+  .scroll-x { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--gridline); white-space: nowrap; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: color-mix(in srgb, var(--series-1) 7%, transparent); }
+  tbody tr[aria-selected="true"] { background: color-mix(in srgb, var(--series-1) 12%, transparent); }
+
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+  .chip .dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+
+  .table-view { margin-top: 14px; }
+  .table-view summary { cursor: pointer; color: var(--text-secondary); font-size: 12.5px; }
+  .table-view table { margin-top: 10px; }
+
+  /* ---------- Detail ---------- */
+  .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 22px; }
+  .kv { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; border-bottom: 1px solid var(--gridline); font-size: 13px; }
+  .kv dt { color: var(--text-secondary); }
+  .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .rule-item { padding: 10px 0; border-bottom: 1px solid var(--gridline); }
+  .rule-item .head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+  .rule-item .why { color: var(--text-secondary); font-size: 12.5px; margin-top: 3px; }
+  .muted { color: var(--text-muted); font-size: 13px; }
+
+  /* ---------- Login ---------- */
+  .login { max-width: 380px; margin: 8vh auto; }
+  .login label { display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 4px; }
+  .login input {
+    width: 100%; font: inherit; padding: 9px 11px; margin-bottom: 12px;
+    border-radius: 8px; border: 1px solid var(--border); background: var(--page); color: var(--text-primary);
+  }
+  .error { color: var(--status-critical); font-size: 13px; margin-top: 10px; }
+  [hidden] { display: none !important; }
+
+  .tooltip {
+    position: fixed; z-index: 10; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--text-primary); color: var(--surface-1); font-size: 12px; line-height: 1.4;
+    padding: 6px 9px; border-radius: 6px; max-width: 260px;
+  }
+  .refreshing { opacity: .55; }
+
+  @media (max-width: 720px) {
+    .hero-row { grid-template-columns: 1fr; }
+    .bar-row { grid-template-columns: 110px 1fr auto; }
+    .shap-row { grid-template-columns: 92px 1fr 60px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<section id="login" class="wrap login">
+  <div class="card">
+    <h2>Fraud Detection · Dashboard</h2>
+    <p class="sub">Inicia sesión con un usuario de la API para ver las métricas.</p>
+    <form id="login-form">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="password">Contraseña</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit" style="width:100%">Entrar</button>
+    </form>
+    <p id="login-error" class="error" hidden></p>
+    <p class="muted" style="margin-top:14px">
+      ¿No tienes usuario? Créalo con <code>POST /auth/register</code>.
+    </p>
+  </div>
+</section>
+
+<!-- ============ DASHBOARD ============ -->
+<main id="dashboard" class="wrap" hidden>
+  <header class="top">
+    <div>
+      <h1>Detección de fraude · Dashboard</h1>
+      <p id="updated-at">—</p>
+    </div>
+    <div class="top-actions">
+      <button id="refresh" type="button">Actualizar</button>
+      <button id="logout" class="link" type="button">Salir</button>
+    </div>
+  </header>
+
+  <div id="panels">
+    <div class="hero-row">
+      <div class="card hero">
+        <div class="label">Transacciones evaluadas</div>
+        <div class="value" id="hero-total">—</div>
+        <div class="foot" id="hero-foot">—</div>
+      </div>
+      <div class="card">
+        <div class="tiles">
+          <div class="tile">
+            <div class="label">Latencia de decisión</div>
+            <div class="value" id="kpi-latency">—</div>
+            <div class="foot">media</div>
+          </div>
+          <div class="tile">
+            <div class="label">Latencia p95</div>
+            <div class="value" id="kpi-p95">—</div>
+            <div class="foot">percentil 95</div>
+          </div>
+          <div class="tile">
+            <div class="label">Score de riesgo</div>
+            <div class="value" id="kpi-score">—</div>
+            <div class="foot">promedio del modelo</div>
+          </div>
+          <div class="tile">
+            <div class="label">Falsos positivos</div>
+            <div class="value" id="kpi-fp">—</div>
+            <div class="foot" id="kpi-fp-foot">sobre casos confirmados</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>Distribución de decisiones</h2>
+      <p class="sub">Cómo resolvió el motor de reglas cada transacción.</p>
+      <div class="stack" id="status-stack" role="img"></div>
+      <div class="legend" id="status-legend"></div>
+      <details class="table-view">
+        <summary>Ver como tabla</summary>
+        <div class="scroll-x"><table id="status-table"></table></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Reglas más activadas</h2>
+      <p class="sub">Veces que cada regla contribuyó a una decisión.</p>
+      <div class="bars" id="rules-bars"></div>
+      <details class="table-view">
+        <summary>Ver como tabla</summary>
+        <div class="scroll-x"><table id="rules-table"></table></div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Transacciones recientes</h2>
+      <p class="sub">Selecciona una fila para ver por qué se tomó la decisión.</p>
+      <div class="scroll-x"><table id="tx-table"></table></div>
+    </section>
+
+    <section class="card" id="detail-card">
+      <h2>Explicabilidad de la decisión</h2>
+      <p class="sub" id="detail-sub">Selecciona una transacción de la tabla.</p>
+      <div id="detail-body"></div>
+    </section>
+  </div>
+</main>
+
+<div class="tooltip" id="tooltip" role="status"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STATUS_META = {
+    APPROVED: { label: "Aprobadas",   icon: "✓", varName: "--status-good" },
+    REVIEW:   { label: "En revisión", icon: "!",      varName: "--status-warning" },
+    BLOCKED:  { label: "Bloqueadas",  icon: "✕", varName: "--status-critical" },
+    PENDING:  { label: "Pendientes",  icon: "·", varName: "--status-neutral" }
+  };
+  var STATUS_ORDER = ["APPROVED", "REVIEW", "BLOCKED", "PENDING"];
+
+  var state = { token: null, summary: null, transactions: [], selectedId: null };
+
+  // ---------- utilities ----------
+  function $(id) { return document.getElementById(id); }
+
+  function el(tag, opts, children) {
+    var node = document.createElement(tag);
+    opts = opts || {};
+    if (opts.className) { node.className = opts.className; }
+    if (opts.text !== undefined) { node.textContent = opts.text; }
+    Object.keys(opts.attrs || {}).forEach(function (k) { node.setAttribute(k, opts.attrs[k]); });
+    Object.keys(opts.style || {}).forEach(function (k) { node.style[k] = opts.style[k]; });
+    (children || []).forEach(function (c) { if (c) { node.appendChild(c); } });
+    return node;
+  }
+
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+  function num(value) {
+    return value === null || value === undefined ? "—" : new Intl.NumberFormat("es-ES").format(value);
+  }
+
+  function ms(value) {
+    if (value === null || value === undefined) { return "—"; }
+    return value >= 1000
+      ? (value / 1000).toFixed(2) + " s"
+      : new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(value) + " ms";
+  }
+
+  function decimals(value, digits) {
+    return value === null || value === undefined ? "—" : value.toFixed(digits === undefined ? 2 : digits);
+  }
+
+  function pct(part, total) { return total ? Math.round((part / total) * 100) : 0; }
+
+  function money(amount, currency) {
+    try {
+      return new Intl.NumberFormat("es-ES", { style: "currency", currency: currency || "USD" }).format(amount);
+    } catch (e) {
+      return num(amount) + " " + (currency || "");
+    }
+  }
+
+  function dateTime(iso) {
+    if (!iso) { return "—"; }
+    var d = new Date(iso);
+    return d.toLocaleString("es-ES", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  function statusMeta(status) {
+    return STATUS_META[status] || { label: status, icon: "·", varName: "--status-neutral" };
+  }
+
+  // A label set inside a colored fill picks white or ink by the fill's luminance.
+  function inkOn(hex) {
+    var h = (hex || "").replace("#", "");
+    if (h.length !== 6) { return "#fff"; }
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 150 ? "#0b0b0b" : "#ffffff";
+  }
+
+  // ---------- tooltip (hover + keyboard focus show the same thing) ----------
+  var tooltip = $("tooltip");
+
+  function bindTip(node, text) {
+    node.setAttribute("tabindex", "0");
+    function show(event) {
+      tooltip.textContent = text;
+      tooltip.style.opacity = "1";
+      var box = node.getBoundingClientRect();
+      var x = (event && event.clientX !== undefined) ? event.clientX : box.left + box.width / 2;
+      tooltip.style.left = Math.min(x + 12, window.innerWidth - tooltip.offsetWidth - 12) + "px";
+      tooltip.style.top = Math.max(box.top - tooltip.offsetHeight - 8, 8) + "px";
+    }
+    function hide() { tooltip.style.opacity = "0"; }
+    node.addEventListener("mouseenter", show);
+    node.addEventListener("mousemove", show);
+    node.addEventListener("mouseleave", hide);
+    node.addEventListener("focus", show);
+    node.addEventListener("blur", hide);
+  }
+
+  // ---------- API ----------
+  function api(path, options) {
+    options = options || {};
+    var headers = options.headers || {};
+    if (state.token) { headers.Authorization = "Bearer " + state.token; }
+    if (options.body) { headers["Content-Type"] = "application/json"; }
+    return fetch(path, { method: options.method || "GET", headers: headers, body: options.body })
+      .then(function (response) {
+        if (response.status === 401) { logout(); throw new Error("Sesión expirada"); }
+        if (!response.ok) { throw new Error("HTTP " + response.status); }
+        return response.json();
+      });
+  }
+
+  // ---------- rendering: decisions stack ----------
+  function renderStatus(summary) {
+    var counts = summary.statusCounts || {};
+    var present = STATUS_ORDER.filter(function (s) { return counts[s] > 0; });
+    var total = present.reduce(function (acc, s) { return acc + counts[s]; }, 0);
+
+    var stack = $("status-stack");
+    var legend = $("status-legend");
+    clear(stack);
+    clear(legend);
+
+    if (!total) {
+      legend.appendChild(el("p", { className: "muted", text: "Todavía no hay transacciones evaluadas." }));
+      return;
+    }
+
+    stack.setAttribute("aria-label",
+      "Distribución de decisiones: " + present.map(function (s) {
+        return statusMeta(s).label + " " + counts[s];
+      }).join(", "));
+
+    var labelled = [];
+    present.forEach(function (status) {
+      var meta = statusMeta(status);
+      var color = cssVar(meta.varName);
+      var share = pct(counts[status], total);
+      var seg = el("div", {
+        className: "seg",
+        style: { flexGrow: String(counts[status]), flexBasis: "0", background: color, color: inkOn(color) }
+      });
+      bindTip(seg, meta.label + ": " + num(counts[status]) + " (" + share + "%)");
+      stack.appendChild(seg);
+      labelled.push({ seg: seg, text: share + "%" });
+    });
+
+    // Measure before labelling: a label only goes inside the mark when it fits
+    // with padding at the current width. Otherwise the legend and the table
+    // view carry the value - never a clipped label.
+    function applyStackLabels() {
+      labelled.forEach(function (entry) {
+        var available = entry.seg.getBoundingClientRect().width;
+        var needed = entry.text.length * 7 + 16;
+        entry.seg.textContent = available >= needed ? entry.text : "";
+      });
+    }
+    requestAnimationFrame(applyStackLabels);
+    if (state.onResize) { window.removeEventListener("resize", state.onResize); }
+    state.onResize = applyStackLabels;
+    window.addEventListener("resize", state.onResize);
+
+    // Legend: icon + label + value, so status never reads by color alone.
+    present.forEach(function (status) {
+      var meta = statusMeta(status);
+      legend.appendChild(el("span", { className: "item" }, [
+        el("span", { className: "dot", style: { background: cssVar(meta.varName) } }),
+        el("span", { className: "icon", text: meta.icon }),
+        el("span", { text: meta.label }),
+        el("span", { className: "val", text: num(counts[status]) }),
+        el("span", { text: "(" + pct(counts[status], total) + "%)" })
+      ]));
+    });
+
+    buildTable($("status-table"),
+      ["Decisión", "Transacciones", "Porcentaje"],
+      present.map(function (s) {
+        return [statusMeta(s).label, num(counts[s]), pct(counts[s], total) + "%"];
+      }), [false, true, true]);
+  }
+
+  // ---------- rendering: rule frequency ----------
+  function renderRules(summary) {
+    var counts = summary.ruleTriggerCounts || {};
+    var rows = Object.keys(counts).map(function (rule) { return { rule: rule, count: counts[rule] }; })
+      .sort(function (a, b) { return b.count - a.count; });
+    var host = $("rules-bars");
+    clear(host);
+
+    if (!rows.length) {
+      host.appendChild(el("p", { className: "muted", text: "Ninguna regla se ha activado todavía." }));
+      clear($("rules-table"));
+      return;
+    }
+
+    var max = rows[0].count;
+    rows.forEach(function (row) {
+      var track = el("div", { className: "bar-track" });
+      var fill = el("div", {
+        className: "bar-fill",
+        style: { width: Math.max((row.count / max) * 100, 1.5) + "%" }
+      });
+      bindTip(fill, row.rule + ": " + num(row.count) + " activaciones");
+      track.appendChild(fill);
+      host.appendChild(el("div", { className: "bar-row" }, [
+        el("div", { className: "name", text: row.rule }),
+        track,
+        el("div", { className: "val", text: num(row.count) })
+      ]));
+    });
+
+    buildTable($("rules-table"), ["Regla", "Activaciones"],
+      rows.map(function (r) { return [r.rule, num(r.count)]; }), [false, true]);
+  }
+
+  function buildTable(table, headers, rows, numericFlags) {
+    clear(table);
+    var head = el("tr");
+    headers.forEach(function (h, i) {
+      head.appendChild(el("th", { className: numericFlags && numericFlags[i] ? "num" : "", text: h }));
+    });
+    table.appendChild(el("thead", {}, [head]));
+
+    var body = el("tbody");
+    rows.forEach(function (cells) {
+      var tr = el("tr");
+      cells.forEach(function (c, i) {
+        tr.appendChild(el("td", { className: numericFlags && numericFlags[i] ? "num" : "", text: String(c) }));
+      });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+  }
+
+  // ---------- rendering: transactions ----------
+  function renderTransactions() {
+    var table = $("tx-table");
+    clear(table);
+
+    var head = el("tr");
+    [["Fecha", false], ["Monto", true], ["Comercio", false], ["País", false], ["Decisión", false], ["Score ML", true]]
+      .forEach(function (h) { head.appendChild(el("th", { className: h[1] ? "num" : "", text: h[0] })); });
+    table.appendChild(el("thead", {}, [head]));
+
+    var body = el("tbody");
+    if (!state.transactions.length) {
+      body.appendChild(el("tr", {}, [
+        el("td", { attrs: { colspan: "6" }, className: "muted", text: "Sin transacciones todavía." })
+      ]));
+    }
+
+    state.transactions.forEach(function (tx) {
+      var meta = statusMeta(tx.status);
+      var tr = el("tr", { attrs: { tabindex: "0", "aria-selected": String(tx.id === state.selectedId) } }, [
+        el("td", { text: dateTime(tx.createdAt) }),
+        el("td", { className: "num", text: money(tx.amount, tx.currency) }),
+        el("td", { text: tx.merchant }),
+        el("td", { text: tx.country }),
+        el("td", {}, []),
+        el("td", { className: "num", text: tx.mlRiskScore === null || tx.mlRiskScore === undefined ? "—" : decimals(tx.mlRiskScore) })
+      ]);
+      tr.children[4].appendChild(el("span", { className: "chip" }, [
+        el("span", { className: "dot", style: { background: cssVar(meta.varName) } }),
+        el("span", { text: meta.label })
+      ]));
+      function select() { state.selectedId = tx.id; renderTransactions(); renderDetail(tx); }
+      tr.addEventListener("click", select);
+      tr.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(); } });
+      body.appendChild(tr);
+    });
+    table.appendChild(body);
+  }
+
+  // ---------- rendering: explainability detail ----------
+  function renderDetail(tx) {
+    var host = $("detail-body");
+    var sub = $("detail-sub");
+    clear(host);
+
+    if (!tx) {
+      sub.textContent = "Selecciona una transacción de la tabla.";
+      return;
+    }
+
+    sub.textContent = money(tx.amount, tx.currency) + " en " + tx.merchant + " (" + tx.country + ") · " + dateTime(tx.createdAt);
+
+    var left = el("div");
+    left.appendChild(el("h3", { text: "Reglas activadas", style: { fontSize: "13px", margin: "0 0 6px" } }));
+
+    var rules = tx.ruleOutcomes || [];
+    if (!rules.length) {
+      left.appendChild(el("p", { className: "muted", text: tx.reason || "Ninguna regla activada." }));
+    } else {
+      rules.forEach(function (rule) {
+        var color = cssVar(rule.severity === "BLOCK" ? "--status-critical" : "--status-warning");
+        left.appendChild(el("div", { className: "rule-item" }, [
+          el("div", { className: "head" }, [
+            el("span", { className: "dot", style: { background: color, width: "9px", height: "9px", borderRadius: "3px", display: "inline-block" } }),
+            el("span", { text: rule.rule }),
+            el("span", { className: "muted", text: rule.severity === "BLOCK" ? "bloqueo" : "revisión" })
+          ]),
+          el("div", { className: "why", text: rule.reason })
+        ]));
+      });
+    }
+
+    var meta = el("dl", { style: { margin: "18px 0 0" } });
+    [
+      ["Decisión", statusMeta(tx.status).label],
+      ["Tiempo de decisión", tx.decidedAt && tx.createdAt ? ms(new Date(tx.decidedAt) - new Date(tx.createdAt)) : "—"],
+      ["Score de riesgo", tx.mlRiskScore === null || tx.mlRiskScore === undefined ? "—" : decimals(tx.mlRiskScore, 4)],
+      ["Modelo", tx.mlModelVersion || "—"],
+      ["Fraude confirmado", tx.confirmedFraud === null || tx.confirmedFraud === undefined ? "sin confirmar" : (tx.confirmedFraud ? "sí" : "no")]
+    ].forEach(function (pair) {
+      meta.appendChild(el("div", { className: "kv" }, [
+        el("dt", { text: pair[0] }),
+        el("dd", { text: pair[1] })
+      ]));
+    });
+    left.appendChild(meta);
+
+    var right = el("div");
+    right.appendChild(el("h3", { text: "Contribución SHAP al score", style: { fontSize: "13px", margin: "0 0 2px" } }));
+
+    var factors = tx.mlTopFactors || [];
+    if (!factors.length) {
+      right.appendChild(el("p", { className: "muted", text: "Sin explicación del modelo (el servicio de ML no respondió para esta transacción)." }));
+    } else {
+      right.appendChild(el("p", {
+        className: "muted",
+        text: "Punto de partida del modelo (base value): " + decimals(tx.mlBaseValue, 2) + " en log-odds. Rojo empuja hacia fraude, azul en contra.",
+        style: { margin: "0 0 14px" }
+      }));
+
+      var maxAbs = factors.reduce(function (acc, f) { return Math.max(acc, Math.abs(f.contribution)); }, 0) || 1;
+      var list = el("div", { className: "bars" });
+      factors.forEach(function (factor) {
+        var positive = factor.contribution >= 0;
+        // Escala lineal (la magnitud real importa: 'amount' suele dominar), pero
+        // con un mínimo visible para que un factor pequeño no desaparezca. El
+        // valor exacto va siempre en la etiqueta y en la tabla.
+        var width = Math.max((Math.abs(factor.contribution) / maxAbs) * 50, 0.8);
+        var track = el("div", { className: "shap-track" }, [el("div", { className: "shap-zero" })]);
+        var fill = el("div", {
+          className: "shap-fill " + (positive ? "pos" : "neg"),
+          style: positive
+            ? { left: "50%", width: width + "%" }
+            : { right: "50%", width: width + "%" }
+        });
+        bindTip(fill, factor.feature + ": " + (positive ? "+" : "") + decimals(factor.contribution, 3) +
+          (positive ? " (aumenta el riesgo)" : " (reduce el riesgo)"));
+        track.appendChild(fill);
+        list.appendChild(el("div", { className: "shap-row" }, [
+          el("div", { className: "name", text: factor.feature }),
+          track,
+          el("div", { className: "val", text: (positive ? "+" : "") + decimals(factor.contribution, 2) })
+        ]));
+      });
+      right.appendChild(list);
+
+      var tableWrap = el("details", { className: "table-view" }, [el("summary", { text: "Ver como tabla" })]);
+      var shapTable = el("table");
+      buildTable(shapTable, ["Feature", "Contribución"],
+        factors.map(function (f) { return [f.feature, (f.contribution >= 0 ? "+" : "") + decimals(f.contribution, 4)]; }),
+        [false, true]);
+      tableWrap.appendChild(el("div", { className: "scroll-x" }, [shapTable]));
+      right.appendChild(tableWrap);
+    }
+
+    host.appendChild(el("div", { className: "detail-grid" }, [left, right]));
+  }
+
+  // ---------- load ----------
+  function renderSummary(summary) {
+    var fraud = summary.fraudDetection || {};
+    $("hero-total").textContent = num(summary.totalTransactions);
+    $("hero-foot").textContent = summary.totalTransactions
+      ? "decisiones registradas con su justificación"
+      : "envía transacciones a POST /transactions";
+    $("kpi-latency").textContent = ms(summary.avgDecisionLatencyMs);
+    $("kpi-p95").textContent = ms(summary.p95DecisionLatencyMs);
+    $("kpi-score").textContent = summary.avgMlRiskScore === null || summary.avgMlRiskScore === undefined
+      ? "—" : decimals(summary.avgMlRiskScore);
+    $("kpi-fp").textContent = num(fraud.falsePositives);
+    $("kpi-fp-foot").textContent = fraud.labeledTransactions
+      ? num(fraud.labeledTransactions) + " confirmadas · precisión " +
+        (fraud.precision === null || fraud.precision === undefined ? "—" : decimals(fraud.precision))
+      : "sin casos confirmados todavía";
+
+    renderStatus(summary);
+    renderRules(summary);
+  }
+
+  function load() {
+    var panels = $("panels");
+    panels.classList.add("refreshing");   // hold the previous render, no skeleton flash
+    return Promise.all([api("/metrics/summary"), api("/transactions")])
+      .then(function (results) {
+        state.summary = results[0];
+        state.transactions = (results[1] || [])
+          .sort(function (a, b) { return new Date(b.createdAt) - new Date(a.createdAt); })
+          .slice(0, 50);
+
+        renderSummary(state.summary);
+        renderTransactions();
+
+        var selected = state.transactions.filter(function (t) { return t.id === state.selectedId; })[0];
+        renderDetail(selected || null);
+        if (!selected) { state.selectedId = null; }
+
+        $("updated-at").textContent = "Actualizado " + new Date().toLocaleTimeString("es-ES");
+      })
+      .catch(function (error) {
+        $("updated-at").textContent = "Error al cargar: " + error.message;
+      })
+      .then(function () { panels.classList.remove("refreshing"); });
+  }
+
+  // ---------- session ----------
+  function readToken() {
+    try { return sessionStorage.getItem("fd.token"); } catch (e) { return null; }
+  }
+  function writeToken(token) {
+    try { token ? sessionStorage.setItem("fd.token", token) : sessionStorage.removeItem("fd.token"); } catch (e) { /* modo privado */ }
+  }
+
+  function showDashboard() {
+    $("login").hidden = true;
+    $("dashboard").hidden = false;
+    load();
+  }
+
+  function logout() {
+    state.token = null;
+    state.selectedId = null;
+    writeToken(null);
+    $("dashboard").hidden = true;
+    $("login").hidden = false;
+  }
+
+  $("login-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var error = $("login-error");
+    error.hidden = true;
+    fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("email").value, password: $("password").value })
+    })
+      .then(function (response) {
+        if (!response.ok) { throw new Error("Credenciales inválidas"); }
+        return response.json();
+      })
+      .then(function (data) {
+        state.token = data.token;
+        writeToken(data.token);
+        showDashboard();
+      })
+      .catch(function (e) {
+        error.textContent = e.message;
+        error.hidden = false;
+      });
+  });
+
+  $("refresh").addEventListener("click", load);
+  $("logout").addEventListener("click", logout);
+
+  var saved = readToken();
+  if (saved) { state.token = saved; showDashboard(); }
+})();
+</script>
+</body>
+</html>
